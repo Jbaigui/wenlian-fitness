@@ -1,0 +1,8 @@
+# Personal fitness data MUST NOT be committed to a public GitHub repository.
+*.local.json
+*训练备份*.json
+*训练明细*.csv
+*AI复盘报告*.md
+.DS_Store
+__pycache__/
+.pytest_cache/
