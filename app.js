@@ -133,7 +133,7 @@ function navMarkup() {
 function heading(sub) {
   const now = new Date();
   const today = toLocalDate(now);
-  return `<header class="topbar"><div class="brand"><span class="brand-mini">稳</span>${APP_NAME} <small class="version-label">V1.2</small></div><div class="top-date">${sub || dateLabel(today)}</div></header>`;
+  return `<header class="topbar"><div class="brand"><span class="brand-mini">稳</span>${APP_NAME} <small class="version-label">V1.2.1</small></div><div class="top-date">${sub || dateLabel(today)}</div></header>`;
 }
 function render() {
   let content='';
@@ -383,7 +383,7 @@ function renderSettings() {
   const s=state.settings;
   return `<div class="section-heading" style="margin-top:8px"><h2 style="font-size:25px">我的设置</h2><small>仅当前设备</small></div>
     <section class="panel">
-      <div class="summary-top"><div><h3>八周训练计划</h3><p>每周一、三、五 · 健康与体能 · 零基础</p></div><span class="badge">V1.2</span></div>
+      <div class="summary-top"><div><h3>八周训练计划</h3><p>每周一、三、五 · 健康与体能 · 零基础</p></div><span class="badge">V1.2.1</span></div>
       <div class="select-line"><div><label for="start-date">第1周的起始日期</label><span>自动按该日期所在的周一计算</span></div><input id="start-date" type="date" data-setting="startDate" value="${esc(s.startDate)}"></div>
       <div class="select-line"><div><label for="rest-sec">默认组间休息</label><span>可在训练中临时延长30秒</span></div>
         <select id="rest-sec" data-setting="restSeconds">${[60,75,90,120,150].map(n=>`<option value="${n}" ${s.restSeconds===n?'selected':''}>${n} 秒</option>`).join('')}</select></div>
@@ -412,7 +412,7 @@ function renderSettings() {
       <div class="session-row"><span class="row-check">—</span><div class="row-main"><b>云端同步：尚未启用</b><small>后续版本才接入 Supabase 登录与同步</small></div></div>
       <div class="session-row"><span class="row-check">—</span><div class="row-main"><b>Apple Watch / Apple 健康：尚未启用</b><small>需要后续原生桥接；当前可独立使用手表体能训练</small></div></div>
     </section>
-    <p class="footer-note">稳练 · 开源单机版 V1.2 · 健身指导不替代专业医疗意见</p>`;
+    <p class="footer-note">稳练 · 开源单机版 V1.2.1 · 健身指导不替代专业医疗意见</p>`;
 }
 function renderModal() {
   const ex=state.modalExercise?EXERCISES[state.modalExercise]:null;
@@ -474,12 +474,19 @@ function startRest(sec) {
   state.draft.restTotal=sec;
   lastTimerExpired=null;
 }
+function captureSetInputs(exId,index,side) {
+  // 点击完成时再次读取当前表单，避免输入尚未失焦就记录了旧值。
+  for(const input of document.querySelectorAll(`[data-ex="${exId}"][data-set="${index}"][data-field]`)) {
+    if(!input.disabled && (input.dataset.side || undefined)===side) updateSetField(input);
+  }
+}
 function completeSet(exId,index) {
   const d=state.draft;
   if(!d) return;
   const ex=d.plan.find(p=>p.id===exId), record=d.records?.[exId]?.[index];
   if(!ex || !record || record.done) return;
   if(isSided(ex) && record.sides){toast('请分别记录两侧，两侧都完成才算一组');return;}
+  captureSetInputs(exId,index);
   const actual=safeNumber(record.actual,NaN);
   if(!Number.isFinite(actual) || actual<=0 || actual>300){toast('请先输入有效的实际次数或时长');return;}
   if (record.weightKg!=='' && (!Number.isFinite(Number(record.weightKg)) || Number(record.weightKg)<0 || Number(record.weightKg)>500)) {
@@ -507,6 +514,7 @@ function completeSide(exId,index,side) {
   const d=state.draft,ex=d?.plan.find(item=>item.id===exId),group=d?.records?.[exId]?.[index];
   if(!ex || !group?.sides || !SIDE_KEYS.includes(side) || group.sides[side].done) return;
   if(index!==d.records[exId].findIndex(r=>!r.done)){toast('请先完成前面一组的两侧');return;}
+  captureSetInputs(exId,index,side);
   const record=group.sides[side],actual=Number(record.actual);
   if(!Number.isInteger(actual) || actual<1 || actual>300){toast('请填写 1–300 的整数次数');return;}
   if(record.weightKg!=='' && (!Number.isFinite(Number(record.weightKg)) || Number(record.weightKg)<0 || Number(record.weightKg)>500)){toast('重量应在 0–500 kg 范围内');return;}
@@ -653,7 +661,7 @@ function makeCsv() {
   return '\ufeff'+rows.map(row=>row.map(csvCell).join(',')).join('\r\n');
 }
 function exportBackup() {
-  const dump={app:'wenlian',schemaVersion:2,appVersion:'1.2',exportedAt:new Date().toISOString(),settings:state.settings,sessions:state.sessions,draft:state.draft};
+  const dump={app:'wenlian',schemaVersion:2,appVersion:'1.2.1',exportedAt:new Date().toISOString(),settings:state.settings,sessions:state.sessions,draft:state.draft};
   downloadFile(`稳练-完整备份-${toLocalDate(new Date())}.json`,JSON.stringify(dump,null,2));
   toast('已创建完整 JSON 备份');
 }
@@ -800,6 +808,10 @@ document.addEventListener('change',event=>{
   if(target.dataset.field==='note' && state.draft){state.draft.notes=target.value.slice(0,2000);save('draft');return;}
   if(target.dataset.field==='overallFeel' && state.draft){state.draft.overallFeel=target.value;save('draft');return;}
   if(target.dataset.field && target.dataset.ex){updateSetField(target);}
+});
+document.addEventListener('input',event=>{
+  const target=event.target;
+  if(target.dataset.ex && ['actual','weightKg'].includes(target.dataset.field)) updateSetField(target);
 });
 document.addEventListener('keydown',event=>{
   if(event.key==='Escape' && state.modalExercise){state.modalExercise=null;render();}

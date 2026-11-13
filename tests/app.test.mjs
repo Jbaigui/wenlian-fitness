@@ -7,11 +7,11 @@ import * as guides from '../exercise-guides.js';
 import * as movement from '../movement.js';
 
 // 执行真实应用函数；用最小 DOM/存储替身验证状态迁移，不冒充浏览器或离线测试。
-function app(saved={}) {
+function app(saved={},pendingFields=[]) {
   const root={innerHTML:''}, writes=[];
   const context=vm.createContext({
     ...plan,...guides,...movement,structuredClone,console,
-    document:{getElementById:()=>root,querySelector:()=>null,addEventListener(){},body:{append(){}},createElement:()=>({setAttribute(){}})},
+    document:{getElementById:()=>root,querySelector:()=>null,querySelectorAll:()=>pendingFields,addEventListener(){},body:{append(){}},createElement:()=>({setAttribute(){}})},
     navigator:{onLine:true},window:{addEventListener(){},scrollTo(){},confirm:()=>true},
     setInterval(){},setTimeout(){},clearTimeout(){},
     readAll:async()=>structuredClone(saved),writeData:async(key,value)=>writes.push([key,structuredClone(value)]),downloadFile(){}
@@ -147,4 +147,17 @@ test('dead bug alternates opposite limbs and bilateral movements count once',()=
   assert.equal(api.completedSets(s),1);
   assert.equal(s.records.chest[0].sides,undefined);
   api.completeSet('chest',0);assert.equal(api.completedSets(s),2);
+});
+test('completion captures current side input even if change event has not fired',()=>{
+  const fields=[
+    {dataset:{ex:'row',set:'0',side:'left',field:'weightKg'},value:'4',disabled:false},
+    {dataset:{ex:'row',set:'0',side:'right',field:'weightKg'},value:'5',disabled:false}
+  ];
+  const {api}=app({},fields);const s=rowSession(api);
+  api.completeSide('row',0,'left');
+  assert.equal(s.records.row[0].sides.left.weightKg,4);
+  assert.equal(s.records.row[0].sides.right.weightKg,'');
+  api.completeSide('row',0,'right');
+  assert.equal(s.records.row[0].sides.right.weightKg,5);
+  assert.equal(s.records.row[0].done,true);
 });
