@@ -11,6 +11,7 @@ import json
 
 ROOT = Path(__file__).resolve().parent.parent
 PLAN = (ROOT / 'plan.js').read_text().replace('export ', '')
+GUIDES = (ROOT / 'exercise-guides.js').read_text().replace('export ', '')
 STORAGE = (ROOT / 'storage.js').read_text().replace('export ', '')
 APP_SOURCE = (ROOT / 'app.js').read_text()
 APP = APP_SOURCE[APP_SOURCE.index('const APP_NAME'):]
@@ -29,7 +30,7 @@ def boot(page, store=None):
           removeItem(k){delete window.__store[k]}
         }});
     '''
-    page.add_script_tag(content=stub + PLAN + '\n' + STORAGE + '\n' + APP)
+    page.add_script_tag(content=stub + PLAN + '\n' + GUIDES + '\n' + STORAGE + '\n' + APP)
     page.locator('.hero h1').wait_for(timeout=10000)
 
 
@@ -45,15 +46,20 @@ def main():
         assert page.locator('.days .day').count() == 3
         assert '全身基础力量' in page.locator('main').inner_text()
         page.locator('[data-action="show-exercise"][data-id="squat"]').first.click()
-        assert 'ACE · Goblet Squat' in page.locator('.modal').inner_text()
+        assert '一次完整动作怎么做' in page.locator('.modal').inner_text()
         page.locator('.modal [data-action="close-modal"]').first.click()
         page.locator('[data-action="start"]').click()
         assert page.locator('.exercise-large h2').inner_text() == '跑步机热身'
         page.locator('[data-action="complete-set"]').click()
+        assert page.locator('.exercise-large h2').inner_text() == '跑步机热身'
+        assert '1 / 1 组全部完成' in page.locator('.exercise-done').inner_text()
+        page.locator('[data-action="continue-exercise"]').click()
         assert page.locator('.exercise-large h2').inner_text() == '哑铃杯式深蹲'
         page.locator('[data-field="weightKg"]').fill('4')
         page.locator('[data-field="actual"]').fill('9')
         page.locator('[data-action="complete-set"]').click()
+        assert page.locator('.exercise-large h2').inner_text() == '哑铃杯式深蹲'
+        page.locator('[data-action="continue-exercise"]').click()
         assert page.locator('#rest-clock').count() == 1
         first_time = page.locator('#rest-clock').inner_text()
         # wait for storage writes and simulate page refresh, sharing only persistent store
@@ -73,6 +79,8 @@ def main():
                 page.locator('[data-action="stop-rest"]').click()
             assert page.locator('[data-action="complete-set"]').count() == 1
             page.locator('[data-action="complete-set"]').click()
+            if page.locator('[data-action="continue-exercise"]').count():
+                page.locator('[data-action="continue-exercise"]').click()
         assert page.locator('[data-action="finish"]').count() == 1
         page.locator('[data-action="finish"]').click()
         assert '已完成' in page.locator('main').inner_text()

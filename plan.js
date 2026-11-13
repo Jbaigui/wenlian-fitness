@@ -1,6 +1,6 @@
 // 训练计划 v1：零基础、健康与体能，每周一/三/五，同一套全身动作。
 // 计划是可修改的静态定义；开始训练时复制一份快照到记录中。
-export const PLAN_VERSION = '1.0';
+export const PLAN_VERSION = '1.1';
 export const ACE_LIBRARY = 'https://www.acefitness.org/resources/everyone/exercise-library/';
 
 export const EXERCISES = {
@@ -40,7 +40,7 @@ export const EXERCISES = {
     points: ['双膝微屈，保持腰背自然稳定。', '主动让臀部向后移动，哑铃贴近双腿下降。', '下降到能保持背部稳定的位置，再推动髋部站直。'],
     mistakes: ['把动作做成弯腰摸地、背部明显弓起。', '用腰部猛地向上甩重量。'],
     alternate: '初练可不持哑铃，先学习髋关节折叠动作；最好请现场有经验者确认姿势。',
-    link: 'https://www.acefitness.org/resources/everyone/exercise-library/317/romanian-deadlift/', linkName: 'ACE · Romanian Deadlift（杠铃示范，理解髋铰链）'
+    link: 'https://www.nasm.org/resource-center/exercise-library/dumbbell-romanian-deadlift', linkName: 'NASM · Dumbbell Romanian Deadlift'
   },
   row: {
     id: 'row', name: '单臂哑铃划船', short: '背部 · 肱二头肌', category: '背部', equipment: '哑铃 + 稳固训练凳',
@@ -56,7 +56,7 @@ export const EXERCISES = {
     points: ['背部得到支撑，哑铃在肩膀附近。', '呼气向上推举，在无不适的范围内活动。', '缓慢放回起点，避免身体明显后仰。'],
     mistakes: ['为了举起重量而过度挺腰。', '出现肩部锐痛还继续强推。'],
     alternate: '第3周起加入；图3机器尚未确认型号，暂不默认替代。',
-    link: 'https://www.acefitness.org/resources/pros/expert-articles/9074/smart-shoulder-solutions-an-evidence-based-approach-to-training-the-deltoids/', linkName: 'ACE · Dumbbell Shoulder Press 训练介绍'
+    link: 'https://www.acefitness.org/resources/everyone/exercise-library/45/seated-overhead-press/', linkName: 'ACE · Seated Overhead Press'
   },
   core: {
     id: 'core', name: '死虫式', short: '核心稳定 · 躯干控制', category: '核心', equipment: '瑜伽垫 / 地面',
@@ -111,6 +111,15 @@ export function recommendedDate(now = new Date()) {
   }
   return toLocalDate(today);
 }
+export function resolveStartDate(settings,sessions=[],draft=null,today=new Date()) {
+  if(/^\d{4}-\d{2}-\d{2}$/.test(settings?.startDate || '')) return settings.startDate;
+  // V1 未写入设置的设备，优先恢复训练快照所指向的第 1 周。
+  const inferred=[...sessions,draft].filter(item=>item && /^\d{4}-\d{2}-\d{2}$/.test(item.date || '')).map(item=>{
+    const week=Number.isInteger(item.week) && item.week>0?item.week:1;
+    return toLocalDate(plusDays(startOfWeek(fromLocalDate(item.date)),-7*(week-1)));
+  }).sort();
+  return inferred[0] || toLocalDate(startOfWeek(today));
+}
 export function workoutForWeek(weekNumber) {
   const w = Math.max(1,Math.min(8,weekNumber));
   const basicSets = w === 1 ? 1 : 2;
@@ -129,6 +138,28 @@ export function weekPhase(weekNumber) {
   if (weekNumber<=4) return '规律建立期';
   if (weekNumber<=6) return '渐进训练期';
   return '巩固提升期';
+}
+export function volumeExplanation(weekNumber) {
+  if (weekNumber<=1) return '第 1 周学习动作：主要力量动作各 1 组。第 2 周起各 2 组；热身和快走始终是 1 个计时环节。';
+  if (weekNumber===2) return '第 2 周：主要力量动作各 2 组。每组都要单独完成并记录；热身和快走各 1 个计时环节。';
+  return `第 ${weekNumber} 周：主要力量动作各 2 组，推肩 ${weekNumber<5?1:2} 组；热身和快走各 1 个计时环节。`;
+}
+// 由实际记录推导进度，刷新、撤销或恢复旧版草稿时不依赖临时界面状态。
+export function exerciseProgress(session, id) {
+  const ex=session.plan.find(item=>item.id===id);
+  const records=session.records?.[id] || [];
+  const total=ex?.sets || 0;
+  const done=records.slice(0,total).filter(item=>item?.done).length;
+  const next=Array.from({length:total},(_,i)=>i).find(i=>!records[i]?.done) ?? -1;
+  return {total,done,next,complete:total>0 && done===total};
+}
+export function nextPendingExercise(session) {
+  for(let step=1;step<=session.plan.length;step++) {
+    const index=(session.activeIndex+step)%session.plan.length;
+    const ex=session.plan[index];
+    if(!session.skipped.includes(ex.id) && !exerciseProgress(session,ex.id).complete) return index;
+  }
+  return -1;
 }
 export function dateLabel(iso) {
   const d = fromLocalDate(iso);

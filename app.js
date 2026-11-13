@@ -1,8 +1,10 @@
 import {
   EXERCISES, PLAN_VERSION, fromLocalDate, toLocalDate, plusDays, startOfWeek,
-  getWeekNumber, recommendedDate, workoutForWeek, weekPhase, dateLabel
+  getWeekNumber, recommendedDate, workoutForWeek, weekPhase, dateLabel,
+  volumeExplanation, exerciseProgress, nextPendingExercise, resolveStartDate
 } from './plan.js';
 import {readAll, writeData, downloadFile} from './storage.js';
+import {EXERCISE_GUIDES, GUIDE_REVIEWED} from './exercise-guides.js';
 
 const APP_NAME = '稳练';
 const ROOT = document.getElementById('app');
@@ -132,7 +134,7 @@ function navMarkup() {
 function heading(sub) {
   const now = new Date();
   const today = toLocalDate(now);
-  return `<header class="topbar"><div class="brand"><span class="brand-mini">稳</span>${APP_NAME}</div><div class="top-date">${sub || dateLabel(today)}</div></header>`;
+  return `<header class="topbar"><div class="brand"><span class="brand-mini">稳</span>${APP_NAME} <small class="version-label">V1.1</small></div><div class="top-date">${sub || dateLabel(today)}</div></header>`;
 }
 function render() {
   let content='';
@@ -197,7 +199,8 @@ function renderHome() {
       </button>
       ${doneToday?`<button class="tertiary" style="width:100%;margin-top:7px" data-action="view-session" data-id="${esc(doneToday.id)}">查看本次记录</button>`:''}
     </section>
-    <div class="section-heading"><h2>动作顺序</h2><small>点击可查看动作要点</small></div>
+    <div class="callout green-callout">${volumeExplanation(week)}</div>
+    <div class="section-heading"><h2>动作顺序</h2><small>点击查看站内详细教学</small></div>
     <section class="panel exercise-preview">
       ${workout.map(ex=>`<button class="preview-row" style="width:100%;text-align:left;background:none" data-action="show-exercise" data-id="${ex.id}">
         <div class="exercise-emblem">${ex.symbol}</div><div class="preview-content"><b>${ex.name}</b><small>${ex.short}</small></div><span class="preview-number">${ex.sets} × ${ex.kind==='time'?ex.min+'min':ex.min===ex.max?ex.min:ex.min+'–'+ex.max}</span>
@@ -218,6 +221,10 @@ function renderWorkout() {
   const progress=Math.round((done/Math.max(1,total))*100);
   const last=idx===draft.plan.length-1;
   const allDone=draft.plan.every(item=> (draft.records[item.id] || []).every(s=>s.done) || draft.skipped.includes(item.id));
+  const current=exerciseProgress(draft,ex.id);
+  const nextIdx=nextPendingExercise(draft);
+  const nextEx=nextIdx>=0?draft.plan[nextIdx]:null;
+  const guide=EXERCISE_GUIDES[ex.id];
   return `
     <section class="training-hero">
       <div class="eyebrow">TRAINING IN PROGRESS</div>
@@ -235,10 +242,18 @@ function renderWorkout() {
     </div>
     <section class="panel">
       <div class="exercise-large"><span class="exercise-emblem">${ex.symbol}</span><div><h2>${ex.name}</h2><p>${ex.short} · ${ex.equipment}</p></div></div>
+      <div class="exercise-progress ${current.complete?'is-complete':''}" role="status" aria-live="polite">
+        <div class="exercise-progress-top"><strong>${current.complete?'本动作已完成':`准备第 ${current.next+1} / ${current.total} 组`}</strong><span>已完成 ${current.done} / ${current.total} 组</span></div>
+        <div class="set-markers" aria-label="本动作各组进度">${sets.map((r,i)=>`<span class="set-marker ${r.done?'done':i===current.next?'current':''}">${r.done?'✓':i+1} 第 ${i+1} 组${r.done?'已完成':i===current.next?'待完成':''}</span>`).join('')}</div>
+        <p>${ex.kind==='time'?'计时环节：按实际分钟数记录。':ex.unit==='次/侧'?`左右各 ${ex.min===ex.max?ex.min:ex.min+'–'+ex.max} 次才算一组。`:'一次完整动作算一次，达到目标次数后再记录一组。'}</p>
+      </div>
       <div class="info-stripe">${icon('info')}<div>目标：${ex.sets} 组，每组 ${ex.min===ex.max?ex.min:`${ex.min}–${ex.max}`}${ex.unit}。${ex.kind==='reps'?'做完应保留约2次余力。':'以身体感受合适为准。'}</div></div>
-      <button class="secondary" style="width:100%;margin-top:12px" data-action="show-exercise" data-id="${ex.id}">${icon('book')} 查看动作要点及专业示范</button>
+      <p class="volume-note">${volumeExplanation(draft.week)}</p>
+      <div class="quick-cue">${icon('book')}<span>${esc(guide?.cue || ex.points[0])}</span></div>
+      <button class="secondary" style="width:100%;margin-top:12px" data-action="show-exercise" data-id="${ex.id}">${icon('book')} 查看完整动作教学（无需跳转）</button>
       ${renderRest(draft)}
-      <div class="set-heading"><h3>训练记录</h3><small>完成一组后点击「记录本组」</small></div>
+      ${current.complete?`<div class="exercise-done"><strong>✓ ${esc(ex.name)}：${current.total} / ${current.total} 组全部完成</strong><p>${nextEx?`接下来：${esc(nextEx.name)}，共 ${nextEx.sets} 组。休息好后再继续。`:'本次训练已无待完成动作，可以保存训练。'}</p>${nextEx?`<button class="primary" data-action="continue-exercise">进入下一动作：${esc(nextEx.name)} ${icon('right')}</button>`:''}</div>`:''}
+      <div class="set-heading"><h3>本动作训练记录</h3><small>${current.complete?'全部记录已保存':`还剩 ${current.total-current.done} 组`}</small></div>
       ${sets.map((record,i)=>renderSet(ex,record,i)).join('')}
       <div class="small-note">${ex.kind==='reps'?'重量指当次使用的哑铃/器械标称重量；若两只哑铃，请记录单只重量。': '计时类动作记录实际分钟数。'} 标记「完成」才会计入统计。</div>
       <label class="caption" for="overall-feel">本次训练整体感受</label>
@@ -259,7 +274,7 @@ function renderSet(ex,record,i) {
   const isTime=ex.kind==='time';
   const next=state.draft.records[ex.id].findIndex(s=>!s.done);
   return `<div class="set-card ${record.done?'completed':''} ${i===next?'is-next':''}">
-    <div class="set-card-top"><div class="set-badge">${record.done?icon('check'):icon('play')} 第 ${i+1} 组</div><span class="set-state">${record.done?'✓ 已记录':i===next?'当前待完成':'尚未完成'}</span></div>
+    <div class="set-card-top"><div class="set-badge">${record.done?icon('check'):icon('play')} 第 ${i+1} / ${ex.sets} 组</div><span class="set-state">${record.done?'✓ 已记录':i===next?'当前待完成':'尚未完成'}</span></div>
     <div class="set-fields">
       ${isTime?`<div class="field"><label for="m-${ex.id}-${i}">实际时长（分钟）</label><input id="m-${ex.id}-${i}" type="number" min="0" max="180" step="1" inputmode="numeric" data-field="actual" data-ex="${ex.id}" data-set="${i}" value="${esc(record.actual)}" ${record.done?'disabled':''}></div>
       <div class="field"><label>目标时长</label><input value="${ex.min}–${ex.max} 分钟" disabled></div>`:
@@ -268,15 +283,20 @@ function renderSet(ex,record,i) {
     </div>
     ${!isTime && !record.done?`<div class="field" style="margin-top:9px"><label for="d-${ex.id}-${i}">这一组的体感</label>
       <select id="d-${ex.id}-${i}" data-field="difficulty" data-ex="${ex.id}" data-set="${i}">${['轻松','适中','吃力'].map(v=>`<option value="${v}" ${record.difficulty===v?'selected':''}>${v}</option>`).join('')}</select></div>`:''}
-    <div class="set-footer"><button class="secondary" style="background:${record.done?'#e4eee0':'#e5efdf'}" data-action="${record.done?'undo-set':'complete-set'}" data-ex="${ex.id}" data-set="${i}">${record.done?'撤销本组完成':'记录本组'} ${icon(record.done?'left':'check')}</button></div>
+    <div class="set-footer"><button class="secondary" style="background:${record.done?'#e4eee0':'#e5efdf'}" data-action="${record.done?'undo-set':'complete-set'}" data-ex="${ex.id}" data-set="${i}" ${!record.done && i!==next?'disabled':''}>${record.done?'撤销本组完成':`完成第 ${i+1} / ${ex.sets} 组并记录`} ${icon(record.done?'left':'check')}</button></div>
   </div>`;
 }
 function renderRest(draft) {
   if (!draft.restUntil) return '';
   const remaining=Math.max(0,Math.ceil((draft.restUntil-Date.now())/1000));
   const expired=remaining===0;
+  const ex=draft.plan[draft.activeIndex];
+  const current=exerciseProgress(draft,ex.id);
+  const nextIdx=nextPendingExercise(draft);
+  const afterRest=current.complete?(nextIdx>=0?`下一动作：${draft.plan[nextIdx].name}（${draft.plan[nextIdx].sets} 组）`:'本次训练可以保存了'):`接下来：${ex.name}，第 ${current.next+1} / ${current.total} 组`;
   return `<aside class="rest-card" id="rest-panel" aria-live="polite">
-    <div class="rest-top"><strong>${expired?'休息已结束':'组间休息'}</strong><small>${expired?'可以开始下一组':'放松呼吸，准备下一组'}</small></div>
+    <div class="rest-top"><strong>${expired?'休息已结束':'组间休息'}</strong><small>${expired?'准备好后再继续':'放松呼吸'}</small></div>
+    <p class="rest-next">${esc(afterRest)}</p>
     ${expired?`<div class="rest-finish">时间到了，继续训练</div>`:
     `<div class="timer-display" id="rest-clock">${formatSeconds(remaining)}</div>`}
     <div class="rest-actions">
@@ -336,7 +356,7 @@ function renderSettings() {
   const s=state.settings;
   return `<div class="section-heading" style="margin-top:8px"><h2 style="font-size:25px">我的设置</h2><small>仅当前设备</small></div>
     <section class="panel">
-      <div class="summary-top"><div><h3>八周训练计划</h3><p>每周一、三、五 · 健康与体能 · 零基础</p></div><span class="badge">V1.0</span></div>
+      <div class="summary-top"><div><h3>八周训练计划</h3><p>每周一、三、五 · 健康与体能 · 零基础</p></div><span class="badge">V1.1</span></div>
       <div class="select-line"><div><label for="start-date">第1周的起始日期</label><span>自动按该日期所在的周一计算</span></div><input id="start-date" type="date" data-setting="startDate" value="${esc(s.startDate)}"></div>
       <div class="select-line"><div><label for="rest-sec">默认组间休息</label><span>可在训练中临时延长30秒</span></div>
         <select id="rest-sec" data-setting="restSeconds">${[60,75,90,120,150].map(n=>`<option value="${n}" ${s.restSeconds===n?'selected':''}>${n} 秒</option>`).join('')}</select></div>
@@ -365,20 +385,30 @@ function renderSettings() {
       <div class="session-row"><span class="row-check">—</span><div class="row-main"><b>云端同步：尚未启用</b><small>后续版本才接入 Supabase 登录与同步</small></div></div>
       <div class="session-row"><span class="row-check">—</span><div class="row-main"><b>Apple Watch / Apple 健康：尚未启用</b><small>需要后续原生桥接；当前可独立使用手表体能训练</small></div></div>
     </section>
-    <p class="footer-note">稳练 · 开源单机版 V1.0 · 健身指导不替代专业医疗意见</p>`;
+    <p class="footer-note">稳练 · 开源单机版 V1.1 · 健身指导不替代专业医疗意见</p>`;
 }
 function renderModal() {
   const ex=state.modalExercise?EXERCISES[state.modalExercise]:null;
   if(!ex) return '';
+  const guide=EXERCISE_GUIDES[ex.id];
+  const planned=state.draft?.plan.find(item=>item.id===ex.id) || workoutForWeek(getWeek(state.selectedDate)).find(item=>item.id===ex.id);
+  const list=(title,items,ordered=false)=>`<h3>${title}</h3><${ordered?'ol':'ul'}>${items.map(item=>`<li>${esc(item)}</li>`).join('')}</${ordered?'ol':'ul'}>`;
   return `<div class="modal-backdrop" data-action="close-modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <div class="modal-handle"></div><button class="modal-close" data-action="close-modal" aria-label="关闭动作说明">${icon('close')}</button>
     <span class="badge dark">${ex.category} · ${ex.equipment}</span><h2 id="modal-title" style="margin-top:13px">${ex.name}</h2>
-    <p>${ex.short}</p><h3>怎么做</h3><ul>${ex.points.map(p=>`<li>${esc(p)}</li>`).join('')}</ul>
-    <h3>常见错误</h3><ul>${ex.mistakes.map(p=>`<li>${esc(p)}</li>`).join('')}</ul>
-    ${ex.alternate?`<div class="callout green-callout">替代或调整：${esc(ex.alternate)}</div>`:''}
-    <h3>专业来源</h3><p>打开 ACE 美国运动委员会官方动作资料。外部网页内容为原作者所有，不在本站转载。</p>
-    <a class="source" href="${esc(ex.link)}" target="_blank" rel="noopener noreferrer">${icon('external')} ${esc(ex.linkName)}</a>
-    <button class="primary" data-action="close-modal">我知道了 ${icon('check')}</button>
+    <p>${ex.short}</p>
+    <div class="guide-summary"><strong>${esc(guide.cue)}</strong><p>${planned?`本次目标 ${planned.sets} 组 · 每组 ${ex.min===ex.max?ex.min:ex.min+'–'+ex.max}${ex.unit}`:'该动作从第 3 周加入计划'}</p><p>${esc(guide.count)}</p></div>
+    <p class="small-note">完整中文教学已内置，可离线阅读；不用离开跟练页。</p>
+    ${list('1 · 开始前怎么摆好',guide.prepare)}
+    ${list('2 · 一次完整动作怎么做',guide.steps,true)}
+    <h3>3 · 呼吸与节奏</h3><p>${esc(guide.breathing)}</p>
+    ${list('4 · 做对时检查什么',guide.check)}
+    ${list('5 · 常见错误',guide.mistakes)}
+    <h3>6 · 太难时怎么调整</h3><p>${esc(guide.easier)}</p>
+    <div class="callout"><b>注意事项：</b>${esc(guide.stop)}</div>
+    <details class="guide-sources"><summary>查看已绑定的专业来源</summary><p>依据官方资料整理的中文要点，并结合本应用的入门计划作调整。不是原文转载；组次以应用内计划为准。核对日期：${GUIDE_REVIEWED}。</p>
+    ${guide.sources.map(item=>`<div class="guide-source"><a class="source" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">${icon('external')} ${esc(item.title)}</a><p>${esc(item.note)}</p></div>`).join('')}</details>
+    <button class="primary" data-action="close-modal">返回训练 ${icon('check')}</button>
   </div></div>`;
 }
 function formatSeconds(value) {
@@ -429,14 +459,16 @@ function completeSet(exId,index) {
   record.actual=actual;
   record.done=true;
   record.doneAt=new Date().toISOString();
-  if (d.records[exId].every(s=>s.done)) moveToNextExercise();
+  // 最后一组完成后保留当前动作的完成提示，由用户明确进入下一动作。
   if(ex.kind==='reps') {
     const stillRemaining=d.plan.some(e=> (d.records[e.id]||[]).some(s=>!s.done) && !d.skipped.includes(e.id));
     if(stillRemaining) startRest(state.settings.restSeconds);
     else {d.restUntil=null;d.restTotal=0;}
   } else {d.restUntil=null;d.restTotal=0;}
   save('draft');render();
-  toast('已记录第 '+(index+1)+' 组');
+  const progress=exerciseProgress(d,exId);
+  toast(progress.complete?`${ex.name}：${progress.total} 组全部完成`:`${ex.name}：已完成 ${progress.done}/${progress.total} 组，休息后做第 ${progress.next+1} 组`);
+  document.querySelector('.exercise-progress')?.scrollIntoView({block:'center',behavior:'smooth'});
 }
 function undoSet(exId,index) {
   const record=state.draft?.records?.[exId]?.[index];
@@ -638,6 +670,11 @@ async function dispatchAction(button) {
     }
     case 'start':createTraining();break;
     case 'resume':newView('workout');break;
+    case 'continue-exercise':
+      if(state.draft){
+        const next=nextPendingExercise(state.draft);
+        if(next>=0){state.draft.activeIndex=next;save('draft');render();window.scrollTo({top:0,behavior:'instant'});}
+      }break;
     case 'show-exercise':state.modalExercise=id;render();break;
     case 'close-modal':state.modalExercise=null;render();break;
     case 'previous-exercise':
@@ -715,14 +752,30 @@ async function initialize() {
   try {
     const saved=await readAll();
     state.settings={...DEFAULT_SETTINGS,...(saved.settings||{})};
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(state.settings.startDate||''))state.settings.startDate=DEFAULT_SETTINGS.startDate;
     state.sessions=Array.isArray(saved.sessions)?saved.sessions:[];
     state.draft=saved.draft?.status==='active'?saved.draft:null;
+    state.settings.startDate=resolveStartDate(saved.settings,state.sessions,state.draft,NOW);
+    // 首次打开也保存起始周，避免没有手动改设置时每到周一又回到第 1 周。
+    await save('settings');
     if(state.draft?.restUntil && Date.now()>=state.draft.restUntil) lastTimerExpired=state.draft.restUntil;
     setWeekForDate(state.selectedDate);
     render();
     if('serviceWorker' in navigator && (location.protocol==='https:' || location.hostname==='localhost' || location.hostname==='127.0.0.1')){
-      navigator.serviceWorker.register('./sw.js',{scope:'./'}).catch(err=>console.warn('Service worker could not install',err));
+      const hadController=Boolean(navigator.serviceWorker.controller);
+      navigator.serviceWorker.addEventListener('controllerchange',()=>{
+        if(!hadController || document.querySelector('.update-banner')) return;
+        const banner=document.createElement('aside');
+        banner.className='update-banner';banner.setAttribute('role','status');
+        banner.innerHTML='新版本已准备好。训练进度会保留。<button type="button">保存进度并更新</button>';
+        banner.querySelector('button').addEventListener('click',async()=>{
+          // 先让正在编辑的输入框触发 change，再等所有本地写入结束。
+          document.activeElement?.blur();
+          await saveQueue;
+          window.location.reload();
+        });
+        document.body.append(banner);
+      });
+      navigator.serviceWorker.register('./sw.js',{scope:'./',updateViaCache:'none'}).then(reg=>reg.update()).catch(err=>console.warn('Service worker could not install',err));
     }
   } catch(error) {
     console.error(error);
