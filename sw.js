@@ -1,11 +1,12 @@
 // App shell 缓存。链接到 ACE 的外部教学页面不会缓存；离线时仍能查看本地要点。
-const CACHE_NAME = 'wenlian-app-v1.2.1';
+const CACHE_NAME = 'wenlian-app-v1.2.2';
 const APP_SHELL = [
   './','./index.html','./styles.css','./app.js','./plan.js','./storage.js','./exercise-guides.js','./movement.js',
   './manifest.webmanifest','./icons/icon-192.png','./icons/icon-512.png','./icons/icon-180.png'
 ];
 self.addEventListener('install',event=>{
-  event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(APP_SHELL)).then(()=>self.skipWaiting()));
+  // 更新时绕过浏览器 HTTP 缓存，防止新缓存里仍装入旧版 JS/CSS。
+  event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(APP_SHELL.map(path=>new Request(new URL(path,self.registration.scope),{cache:'reload'})))).then(()=>self.skipWaiting()));
 });
 self.addEventListener('activate',event=>{
   event.waitUntil((async()=>{
