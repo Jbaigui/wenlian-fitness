@@ -134,7 +134,7 @@ function navMarkup() {
 function heading(sub) {
   const now = new Date();
   const today = toLocalDate(now);
-  return `<header class="topbar"><div class="brand"><span class="brand-mini">稳</span>${APP_NAME} <small class="version-label">V1.1</small></div><div class="top-date">${sub || dateLabel(today)}</div></header>`;
+  return `<header class="topbar"><div class="brand"><span class="brand-mini">稳</span>${APP_NAME} <small class="version-label">V1.1.1</small></div><div class="top-date">${sub || dateLabel(today)}</div></header>`;
 }
 function render() {
   let content='';
@@ -201,9 +201,10 @@ function renderHome() {
     </section>
     <div class="callout green-callout">${volumeExplanation(week)}</div>
     <div class="section-heading"><h2>动作顺序</h2><small>点击查看站内详细教学</small></div>
+    <p class="small-note">先连续做完一组的次数，再记录、休息；完成全部组数后换动作。</p>
     <section class="panel exercise-preview">
       ${workout.map(ex=>`<button class="preview-row" style="width:100%;text-align:left;background:none" data-action="show-exercise" data-id="${ex.id}">
-        <div class="exercise-emblem">${ex.symbol}</div><div class="preview-content"><b>${ex.name}</b><small>${ex.short}</small></div><span class="preview-number">${ex.sets} × ${ex.kind==='time'?ex.min+'min':ex.min===ex.max?ex.min:ex.min+'–'+ex.max}</span>
+        <div class="exercise-emblem">${ex.symbol}</div><div class="preview-content"><b>${ex.name}</b><small>${ex.short}</small><span class="preview-number">${ex.kind==='time'?`${ex.sets} 次（持续 ${ex.min===ex.max?ex.min:ex.min+'～'+ex.max} 分钟）`:`${ex.sets} 组（每组${ex.unit==='次/侧'?'左右各':' '} ${ex.min===ex.max?ex.min:ex.min+'～'+ex.max} 次）`}</span></div>
       </button>`).join('')}
     </section>
     <div class="tip">${icon('shield')}<div>如果当天感觉疲劳，可降低重量或减少组数。出现关节锐痛、胸痛、明显头晕应停止训练。</div></div>
@@ -356,7 +357,7 @@ function renderSettings() {
   const s=state.settings;
   return `<div class="section-heading" style="margin-top:8px"><h2 style="font-size:25px">我的设置</h2><small>仅当前设备</small></div>
     <section class="panel">
-      <div class="summary-top"><div><h3>八周训练计划</h3><p>每周一、三、五 · 健康与体能 · 零基础</p></div><span class="badge">V1.1</span></div>
+      <div class="summary-top"><div><h3>八周训练计划</h3><p>每周一、三、五 · 健康与体能 · 零基础</p></div><span class="badge">V1.1.1</span></div>
       <div class="select-line"><div><label for="start-date">第1周的起始日期</label><span>自动按该日期所在的周一计算</span></div><input id="start-date" type="date" data-setting="startDate" value="${esc(s.startDate)}"></div>
       <div class="select-line"><div><label for="rest-sec">默认组间休息</label><span>可在训练中临时延长30秒</span></div>
         <select id="rest-sec" data-setting="restSeconds">${[60,75,90,120,150].map(n=>`<option value="${n}" ${s.restSeconds===n?'selected':''}>${n} 秒</option>`).join('')}</select></div>
@@ -385,7 +386,7 @@ function renderSettings() {
       <div class="session-row"><span class="row-check">—</span><div class="row-main"><b>云端同步：尚未启用</b><small>后续版本才接入 Supabase 登录与同步</small></div></div>
       <div class="session-row"><span class="row-check">—</span><div class="row-main"><b>Apple Watch / Apple 健康：尚未启用</b><small>需要后续原生桥接；当前可独立使用手表体能训练</small></div></div>
     </section>
-    <p class="footer-note">稳练 · 开源单机版 V1.1 · 健身指导不替代专业医疗意见</p>`;
+    <p class="footer-note">稳练 · 开源单机版 V1.1.1 · 健身指导不替代专业医疗意见</p>`;
 }
 function renderModal() {
   const ex=state.modalExercise?EXERCISES[state.modalExercise]:null;
