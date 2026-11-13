@@ -5,6 +5,7 @@ import {
 } from './plan.js';
 import {readAll, writeData, downloadFile} from './storage.js';
 import {EXERCISE_GUIDES, GUIDE_REVIEWED} from './exercise-guides.js';
+import {movementFor,isSided,SIDE_KEYS,freshRecord,syncSideGroup,upgradeDraftSides,hasRecordedWork,recordDescription} from './movement.js';
 
 const APP_NAME = '稳练';
 const ROOT = document.getElementById('app');
@@ -92,9 +93,7 @@ function makeSession(date) {
   const plan=workoutForWeek(week);
   const records={};
   for (const ex of plan) {
-    records[ex.id] = Array.from({length:ex.sets},()=>({
-      weightKg: '', actual: ex.min, difficulty: '适中', done:false, doneAt:null
-    }));
+    records[ex.id] = Array.from({length:ex.sets},()=>freshRecord(ex));
   }
   const id=(window.crypto?.randomUUID?.() || `s-${Date.now()}-${Math.round(Math.random()*1e8)}`);
   return {
@@ -134,7 +133,7 @@ function navMarkup() {
 function heading(sub) {
   const now = new Date();
   const today = toLocalDate(now);
-  return `<header class="topbar"><div class="brand"><span class="brand-mini">稳</span>${APP_NAME} <small class="version-label">V1.1.1</small></div><div class="top-date">${sub || dateLabel(today)}</div></header>`;
+  return `<header class="topbar"><div class="brand"><span class="brand-mini">稳</span>${APP_NAME} <small class="version-label">V1.2</small></div><div class="top-date">${sub || dateLabel(today)}</div></header>`;
 }
 function render() {
   let content='';
@@ -204,7 +203,7 @@ function renderHome() {
     <p class="small-note">先连续做完一组的次数，再记录、休息；完成全部组数后换动作。</p>
     <section class="panel exercise-preview">
       ${workout.map(ex=>`<button class="preview-row" style="width:100%;text-align:left;background:none" data-action="show-exercise" data-id="${ex.id}">
-        <div class="exercise-emblem">${ex.symbol}</div><div class="preview-content"><b>${ex.name}</b><small>${ex.short}</small><span class="preview-number">${ex.kind==='time'?`${ex.sets} 次（持续 ${ex.min===ex.max?ex.min:ex.min+'～'+ex.max} 分钟）`:`${ex.sets} 组（每组${ex.unit==='次/侧'?'左右各':' '} ${ex.min===ex.max?ex.min:ex.min+'～'+ex.max} 次）`}</span></div>
+        <div class="exercise-emblem">${ex.symbol}</div><div class="preview-content"><b>${ex.name}</b><small>${ex.short}</small><span class="movement-tag">${esc(movementFor(ex).label)}</span><span class="preview-number">${ex.kind==='time'?`${ex.sets} 次（持续 ${ex.min===ex.max?ex.min:ex.min+'～'+ex.max} 分钟）`:`${ex.sets} 组（每组${ex.unit==='次/侧'?'两侧各':' '} ${ex.min===ex.max?ex.min:ex.min+'～'+ex.max} 次）`}</span></div>
       </button>`).join('')}
     </section>
     <div class="tip">${icon('shield')}<div>如果当天感觉疲劳，可降低重量或减少组数。出现关节锐痛、胸痛、明显头晕应停止训练。</div></div>
@@ -243,6 +242,7 @@ function renderWorkout() {
     </div>
     <section class="panel">
       <div class="exercise-large"><span class="exercise-emblem">${ex.symbol}</span><div><h2>${ex.name}</h2><p>${ex.short} · ${ex.equipment}</p></div></div>
+      <div class="movement-instruction"><strong>${esc(movementFor(ex).label)}</strong><p>${esc(movementFor(ex).cue)}</p></div>
       <div class="exercise-progress ${current.complete?'is-complete':''}" role="status" aria-live="polite">
         <div class="exercise-progress-top"><strong>${current.complete?'本动作已完成':`准备第 ${current.next+1} / ${current.total} 组`}</strong><span>已完成 ${current.done} / ${current.total} 组</span></div>
         <div class="set-markers" aria-label="本动作各组进度">${sets.map((r,i)=>`<span class="set-marker ${r.done?'done':i===current.next?'current':''}">${r.done?'✓':i+1} 第 ${i+1} 组${r.done?'已完成':i===current.next?'待完成':''}</span>`).join('')}</div>
@@ -272,10 +272,12 @@ function renderWorkout() {
   `;
 }
 function renderSet(ex,record,i) {
+  if(isSided(ex) && record.sides) return renderSideSet(ex,record,i);
   const isTime=ex.kind==='time';
   const next=state.draft.records[ex.id].findIndex(s=>!s.done);
   return `<div class="set-card ${record.done?'completed':''} ${i===next?'is-next':''}">
     <div class="set-card-top"><div class="set-badge">${record.done?icon('check'):icon('play')} 第 ${i+1} / ${ex.sets} 组</div><span class="set-state">${record.done?'✓ 已记录':i===next?'当前待完成':'尚未完成'}</span></div>
+    ${isSided(ex)?'<p class="small-note">旧版合并记录：未分别记录两侧。原组数与成绩保留。</p>':''}
     <div class="set-fields">
       ${isTime?`<div class="field"><label for="m-${ex.id}-${i}">实际时长（分钟）</label><input id="m-${ex.id}-${i}" type="number" min="0" max="180" step="1" inputmode="numeric" data-field="actual" data-ex="${ex.id}" data-set="${i}" value="${esc(record.actual)}" ${record.done?'disabled':''}></div>
       <div class="field"><label>目标时长</label><input value="${ex.min}–${ex.max} 分钟" disabled></div>`:
@@ -285,6 +287,30 @@ function renderSet(ex,record,i) {
     ${!isTime && !record.done?`<div class="field" style="margin-top:9px"><label for="d-${ex.id}-${i}">这一组的体感</label>
       <select id="d-${ex.id}-${i}" data-field="difficulty" data-ex="${ex.id}" data-set="${i}">${['轻松','适中','吃力'].map(v=>`<option value="${v}" ${record.difficulty===v?'selected':''}>${v}</option>`).join('')}</select></div>`:''}
     <div class="set-footer"><button class="secondary" style="background:${record.done?'#e4eee0':'#e5efdf'}" data-action="${record.done?'undo-set':'complete-set'}" data-ex="${ex.id}" data-set="${i}" ${!record.done && i!==next?'disabled':''}>${record.done?'撤销本组完成':`完成第 ${i+1} / ${ex.sets} 组并记录`} ${icon(record.done?'left':'check')}</button></div>
+  </div>`;
+}
+function renderSideSet(ex,record,i) {
+  const next=state.draft.records[ex.id].findIndex(r=>!r.done);
+  const locked=i!==next && !record.done;
+  const movement=movementFor(ex);
+  const count=SIDE_KEYS.filter(side=>record.sides[side].done).length;
+  return `<div class="set-card ${record.done?'completed':''} ${i===next?'is-next':''}">
+    <div class="set-card-top"><div class="set-badge">第 ${i+1} / ${ex.sets} 组</div><span class="set-state">${record.done?'✓ 整组完成':`两侧已完成 ${count} / 2`}</span></div>
+    <p class="side-count-note">${ex.id==='core'?`交替做两种配对，每种各 ${ex.min} 次，共 ${ex.min*2} 次伸展；分别记录后才完成这一组。`:`左手 ${ex.min} 次＋右手 ${ex.min} 次，共同算 1 组；只做一侧不计整组完成。`}</p>
+    <div class="side-records">${SIDE_KEYS.map(side=>{
+      const r=record.sides[side], name=movement.sides[side], prefix=`side-${ex.id}-${i}-${side}`;
+      const disabled=r.done || locked;
+      return `<section class="side-card ${r.done?'completed':''}" aria-label="第 ${i+1} 组 ${name}">
+        <div class="side-card-heading"><strong>${name}</strong><span>${r.done?'✓ 已完成':'待完成'}</span></div>
+        <div class="set-fields ${ex.id==='core'?'single-field':''}">
+          ${ex.id!=='core'?`<div class="field"><label for="${prefix}-weight">${name}重量（kg）</label><input id="${prefix}-weight" aria-label="第${i+1}组${name}重量（kg）" type="number" min="0" max="500" step="0.5" inputmode="decimal" placeholder="可留空" data-field="weightKg" data-ex="${ex.id}" data-set="${i}" data-side="${side}" value="${esc(r.weightKg)}" ${disabled?'disabled':''}></div>`:''}
+          <div class="field"><label for="${prefix}-actual">${name}实际次数</label><input id="${prefix}-actual" aria-label="第${i+1}组${name}实际次数" type="number" min="1" max="300" step="1" inputmode="numeric" data-field="actual" data-ex="${ex.id}" data-set="${i}" data-side="${side}" value="${esc(r.actual)}" ${disabled?'disabled':''}></div>
+        </div>
+        <div class="field side-feel"><label for="${prefix}-feel">${name}体感</label><select id="${prefix}-feel" aria-label="第${i+1}组${name}体感" data-field="difficulty" data-ex="${ex.id}" data-set="${i}" data-side="${side}" ${disabled?'disabled':''}>${['轻松','适中','吃力'].map(v=>`<option value="${v}" ${r.difficulty===v?'selected':''}>${v}</option>`).join('')}</select></div>
+        <button class="secondary side-complete" data-action="${r.done?'undo-side':'complete-side'}" data-ex="${ex.id}" data-set="${i}" data-side="${side}" ${locked?'disabled':''}>${r.done?`撤销${name}完成（第${i+1}组）`:`记录${name}完成（第${i+1}组）`}</button>
+      </section>`;
+    }).join('')}</div>
+    <p class="side-group-status" role="status">${record.done?'两侧均已记录，本组已计入完成组数。':count===1?'还有一侧未完成，本组尚未计入完成组数。':'请分别记录两侧；两侧全部完成才算一组。'}</p>
   </div>`;
 }
 function renderRest(draft) {
@@ -347,7 +373,7 @@ function renderDetail() {
       ${session.plan.map(ex=>{
         const records=session.records[ex.id] || [];
         return `<div class="session-row"><span class="row-check">${icon('check')}</span><div class="row-main"><b>${ex.name}</b>
-          <small>${records.map((set,i)=>set.done?`第${i+1}组 ${ex.kind==='reps'?`${set.weightKg!==''?set.weightKg+'kg · ':''}${set.actual}${ex.unit}`:`${set.actual}分钟`}`:null).filter(Boolean).join('；') || '未完成'}</small></div></div>`;
+          <small>${esc(movementFor(ex).label)}</small><small>${records.map((set,i)=>hasRecordedWork(set)?`第${i+1}组 ${esc(recordDescription(ex,set))}`:null).filter(Boolean).join('；') || '未完成'}</small></div></div>`;
       }).join('')}
       ${session.notes?`<div class="tip">备注：${esc(session.notes)}</div>`:''}
     </section><div style="text-align:right;margin-top:11px"><button class="ghost-danger" data-action="delete-session">删除这条记录</button></div>
@@ -357,7 +383,7 @@ function renderSettings() {
   const s=state.settings;
   return `<div class="section-heading" style="margin-top:8px"><h2 style="font-size:25px">我的设置</h2><small>仅当前设备</small></div>
     <section class="panel">
-      <div class="summary-top"><div><h3>八周训练计划</h3><p>每周一、三、五 · 健康与体能 · 零基础</p></div><span class="badge">V1.1.1</span></div>
+      <div class="summary-top"><div><h3>八周训练计划</h3><p>每周一、三、五 · 健康与体能 · 零基础</p></div><span class="badge">V1.2</span></div>
       <div class="select-line"><div><label for="start-date">第1周的起始日期</label><span>自动按该日期所在的周一计算</span></div><input id="start-date" type="date" data-setting="startDate" value="${esc(s.startDate)}"></div>
       <div class="select-line"><div><label for="rest-sec">默认组间休息</label><span>可在训练中临时延长30秒</span></div>
         <select id="rest-sec" data-setting="restSeconds">${[60,75,90,120,150].map(n=>`<option value="${n}" ${s.restSeconds===n?'selected':''}>${n} 秒</option>`).join('')}</select></div>
@@ -386,7 +412,7 @@ function renderSettings() {
       <div class="session-row"><span class="row-check">—</span><div class="row-main"><b>云端同步：尚未启用</b><small>后续版本才接入 Supabase 登录与同步</small></div></div>
       <div class="session-row"><span class="row-check">—</span><div class="row-main"><b>Apple Watch / Apple 健康：尚未启用</b><small>需要后续原生桥接；当前可独立使用手表体能训练</small></div></div>
     </section>
-    <p class="footer-note">稳练 · 开源单机版 V1.1.1 · 健身指导不替代专业医疗意见</p>`;
+    <p class="footer-note">稳练 · 开源单机版 V1.2 · 健身指导不替代专业医疗意见</p>`;
 }
 function renderModal() {
   const ex=state.modalExercise?EXERCISES[state.modalExercise]:null;
@@ -398,6 +424,7 @@ function renderModal() {
     <div class="modal-handle"></div><button class="modal-close" data-action="close-modal" aria-label="关闭动作说明">${icon('close')}</button>
     <span class="badge dark">${ex.category} · ${ex.equipment}</span><h2 id="modal-title" style="margin-top:13px">${ex.name}</h2>
     <p>${ex.short}</p>
+    <div class="movement-instruction"><strong>${esc(movementFor(ex).label)}</strong><p>${esc(movementFor(ex).cue)}</p></div>
     <div class="guide-summary"><strong>${esc(guide.cue)}</strong><p>${planned?`本次目标 ${planned.sets} 组 · 每组 ${ex.min===ex.max?ex.min:ex.min+'–'+ex.max}${ex.unit}`:'该动作从第 3 周加入计划'}</p><p>${esc(guide.count)}</p></div>
     <p class="small-note">完整中文教学已内置，可离线阅读；不用离开跟练页。</p>
     ${list('1 · 开始前怎么摆好',guide.prepare)}
@@ -452,12 +479,17 @@ function completeSet(exId,index) {
   if(!d) return;
   const ex=d.plan.find(p=>p.id===exId), record=d.records?.[exId]?.[index];
   if(!ex || !record || record.done) return;
+  if(isSided(ex) && record.sides){toast('请分别记录两侧，两侧都完成才算一组');return;}
   const actual=safeNumber(record.actual,NaN);
   if(!Number.isFinite(actual) || actual<=0 || actual>300){toast('请先输入有效的实际次数或时长');return;}
   if (record.weightKg!=='' && (!Number.isFinite(Number(record.weightKg)) || Number(record.weightKg)<0 || Number(record.weightKg)>500)) {
     toast('重量应在 0–500 kg 范围内'); return;
   }
   record.actual=actual;
+  finishSet(ex,record,index);
+}
+function finishSet(ex,record,index) {
+  const d=state.draft;
   record.done=true;
   record.doneAt=new Date().toISOString();
   // 最后一组完成后保留当前动作的完成提示，由用户明确进入下一动作。
@@ -467,14 +499,37 @@ function completeSet(exId,index) {
     else {d.restUntil=null;d.restTotal=0;}
   } else {d.restUntil=null;d.restTotal=0;}
   save('draft');render();
-  const progress=exerciseProgress(d,exId);
+  const progress=exerciseProgress(d,ex.id);
   toast(progress.complete?`${ex.name}：${progress.total} 组全部完成`:`${ex.name}：已完成 ${progress.done}/${progress.total} 组，休息后做第 ${progress.next+1} 组`);
   document.querySelector('.exercise-progress')?.scrollIntoView({block:'center',behavior:'smooth'});
+}
+function completeSide(exId,index,side) {
+  const d=state.draft,ex=d?.plan.find(item=>item.id===exId),group=d?.records?.[exId]?.[index];
+  if(!ex || !group?.sides || !SIDE_KEYS.includes(side) || group.sides[side].done) return;
+  if(index!==d.records[exId].findIndex(r=>!r.done)){toast('请先完成前面一组的两侧');return;}
+  const record=group.sides[side],actual=Number(record.actual);
+  if(!Number.isInteger(actual) || actual<1 || actual>300){toast('请填写 1–300 的整数次数');return;}
+  if(record.weightKg!=='' && (!Number.isFinite(Number(record.weightKg)) || Number(record.weightKg)<0 || Number(record.weightKg)>500)){toast('重量应在 0–500 kg 范围内');return;}
+  record.actual=actual;record.done=true;record.doneAt=new Date().toISOString();
+  syncSideGroup(group);
+  if(group.done) {finishSet(ex,group,index);return;}
+  save('draft');render();
+  const pending=SIDE_KEYS.find(s=>!group.sides[s].done);
+  toast(`${movementFor(ex).sides[side]}已记录；${movementFor(ex).sides[pending]}还未完成，本组尚未完成`);
+}
+function undoSide(exId,index,side) {
+  const d=state.draft,record=d?.records?.[exId]?.[index];
+  if(!record?.sides?.[side]?.done) return;
+  record.sides[side].done=false;record.sides[side].doneAt=null;syncSideGroup(record);
+  d.activeIndex=d.plan.findIndex(ex=>ex.id===exId);d.restUntil=null;d.restTotal=0;
+  save('draft');render();toast('已撤销这一侧；另一侧记录保留，本组改为未完成');
 }
 function undoSet(exId,index) {
   const record=state.draft?.records?.[exId]?.[index];
   if(!record || !record.done) return;
   record.done=false;record.doneAt=null;
+  const ex=state.draft.plan.find(e=>e.id===exId);
+  if(isSided(ex)) record.sides=freshRecord(ex,record).sides;
   const exIdx=state.draft.plan.findIndex(e=>e.id===exId);
   if(exIdx>=0) state.draft.activeIndex=exIdx;
   state.draft.restUntil=null;
@@ -485,7 +540,8 @@ async function finishWorkout(early=false) {
   const draft=state.draft;
   if(!draft) return;
   const done=completedSets(draft);
-  if(early && !window.confirm(`本次已记录 ${done}/${totalSets(draft)} 组。确定提前结束并保存吗？`)) return;
+  const partial=Object.values(draft.records).flat().filter(r=>r.sides && !r.done && hasRecordedWork(r)).length;
+  if(early && !window.confirm(`本次已记录 ${done}/${totalSets(draft)} 个完整组${partial?`，另有 ${partial} 组仅完成一侧（也会保留）`:''}。确定提前结束并保存吗？`)) return;
   if(!early && done===0) {toast('至少先完成一组训练再保存');return;}
   draft.status='completed';
   draft.completedAt=new Date().toISOString();
@@ -514,8 +570,10 @@ function updateSetField(target) {
   const exId=target.dataset.ex;
   const idx=Number(target.dataset.set);
   const field=target.dataset.field;
-  const record=state.draft?.records?.[exId]?.[idx];
-  if(!record || record.done) return;
+  const group=state.draft?.records?.[exId]?.[idx];
+  const side=target.dataset.side;
+  const record=side && SIDE_KEYS.includes(side)?group?.sides?.[side]:group;
+  if(!record || record.done || (group?.sides && !side)) return;
   if(field==='difficulty') record.difficulty=target.value;
   else if(field==='weightKg') {
     const raw=target.value.trim();
@@ -564,9 +622,8 @@ function makeReport() {
     lines.push('',`### ${s.date} · 第 ${s.week} 周（${s.planVersion || PLAN_VERSION}）`,
       `整体感受：${s.overallFeel || '未填写'}；完成 ${completedSets(s)}/${totalSets(s)} 组`);
     for(const ex of s.plan){
-      const items=(s.records?.[ex.id]||[]).map((r,i)=>r?.done ?
-        `第${i+1}组 ${ex.kind==='time'?`${r.actual}分钟`:`${r.weightKg===''?'重量未记录':r.weightKg+'kg'} × ${r.actual}${ex.unit}`}（${r.difficulty||'未标注'}）` : null).filter(Boolean);
-      lines.push(`- ${ex.name}：${items.join('；') || '未完成'}${s.skipped?.includes(ex.id)?'（跳过）':''}`);
+      const items=(s.records?.[ex.id]||[]).map((r,i)=>hasRecordedWork(r)?`第${i+1}组 ${recordDescription(ex,r)}`:null).filter(Boolean);
+      lines.push(`- ${ex.name}（${movementFor(ex).label}）：${items.join('；') || '未完成'}${s.skipped?.includes(ex.id)?'（跳过）':''}`);
     }
     if(s.notes) lines.push(`- 备注：${String(s.notes).replace(/\r?\n/g,' ')}`);
   }
@@ -576,22 +633,27 @@ function makeReport() {
 }
 function csvCell(s) {return `"${String(s??'').replace(/"/g,'""')}"`;}
 function makeCsv() {
-  const header=['日期','状态','计划周','动作','组数序号','目标下限','目标上限','实际次数或分钟','单位','单只哑铃或器械重量kg','组体感','整体体感','备注'];
+  const header=['日期','状态','计划周','动作','组数序号','目标下限','目标上限','实际次数或分钟','单位','单只哑铃或器械重量kg','组体感','整体体感','备注','侧别或配对','整组完成'];
   const rows=[header];
   for(const s of getLatestSessions()){
     for(const ex of s.plan){
       const sets=s.records[ex.id]||[];
       for(let i=0;i<sets.length;i++){
         const r=sets[i];
-        if(!r.done) continue;
-        rows.push([s.date,s.status,s.week,ex.name,i+1,ex.min,ex.max,r.actual,ex.unit,r.weightKg,r.difficulty||'',s.overallFeel||'',s.notes||'']);
+        if(!hasRecordedWork(r)) continue;
+        if(r.sides && isSided(ex)) {
+          for(const side of SIDE_KEYS){
+            const item=r.sides[side];if(!item.done)continue;
+            rows.push([s.date,s.status,s.week,ex.name,i+1,ex.min,ex.max,item.actual,'次',item.weightKg,item.difficulty||'',s.overallFeel||'',s.notes||'',movementFor(ex).sides[side],r.done?'是':'否']);
+          }
+        } else rows.push([s.date,s.status,s.week,ex.name,i+1,ex.min,ex.max,r.actual,ex.unit,r.weightKg,r.difficulty||'',s.overallFeel||'',s.notes||'',isSided(ex)?'旧版合并，未分别记录两侧':movementFor(ex).label,'是']);
       }
     }
   }
   return '\ufeff'+rows.map(row=>row.map(csvCell).join(',')).join('\r\n');
 }
 function exportBackup() {
-  const dump={app:'wenlian',schemaVersion:1,exportedAt:new Date().toISOString(),settings:state.settings,sessions:state.sessions,draft:state.draft};
+  const dump={app:'wenlian',schemaVersion:2,appVersion:'1.2',exportedAt:new Date().toISOString(),settings:state.settings,sessions:state.sessions,draft:state.draft};
   downloadFile(`稳练-完整备份-${toLocalDate(new Date())}.json`,JSON.stringify(dump,null,2));
   toast('已创建完整 JSON 备份');
 }
@@ -609,12 +671,24 @@ function normalizeSession(raw) {
     records[ex.id]=Array.from({length:ex.sets},(_,i)=>{
       const item=source[i]||{};
       const weight=safeNumber(item.weightKg,0);
-      return {
+      const record={
         weightKg: item.weightKg==='' || item.weightKg===undefined?'':Math.max(0,Math.min(500,weight)),
         actual: Math.min(300,Math.max(0,safeNumber(item.actual,ex.min))),
         difficulty: ['轻松','适中','吃力'].includes(item.difficulty)?item.difficulty:'适中',
         done: Boolean(item.done),doneAt:typeof item.doneAt==='string'?item.doneAt:null
       };
+      if(isSided(ex) && item.sides && typeof item.sides==='object') {
+        record.sides=Object.fromEntries(SIDE_KEYS.map(side=>{
+          const r=item.sides[side]||{},actual=Math.min(300,Math.max(0,Math.round(safeNumber(r.actual,ex.min))));
+          return [side,{
+            weightKg:ex.id==='core' || r.weightKg==='' || r.weightKg===undefined?'':Math.max(0,Math.min(500,safeNumber(r.weightKg,0))),
+            actual,difficulty:['轻松','适中','吃力'].includes(r.difficulty)?r.difficulty:'适中',
+            done:Boolean(r.done) && actual>0,doneAt:typeof r.doneAt==='string'?r.doneAt:null
+          }];
+        }));
+        syncSideGroup(record);
+      }
+      return record;
     });
   }
   return {
@@ -636,7 +710,7 @@ async function importBackup(file) {
   if(file.size>8*1024*1024){toast('备份文件过大（最大 8MB）');return;}
   try {
     const data=JSON.parse(await file.text());
-    if(data.app!=='wenlian' || data.schemaVersion!==1 || !Array.isArray(data.sessions)) throw Error('不是有效的 V1 备份格式');
+    if(data.app!=='wenlian' || ![1,2].includes(data.schemaVersion) || !Array.isArray(data.sessions)) throw Error('不是有效的稳练备份格式');
     if(data.sessions.length>1500) throw Error('超过导入记录数量限制');
     if(!window.confirm('导入会替换当前设备上的设置、历史和未完成训练。请先导出本机 JSON 备份。确定继续吗？')) return;
     const sessions=data.sessions.map(normalizeSession).filter(Boolean).filter(x=>x.status==='completed');
@@ -649,6 +723,7 @@ async function importBackup(file) {
     state.sessions=sessions;
     state.draft=data.draft?normalizeSession(data.draft):null;
     if(state.draft && state.draft.status!=='active') state.draft=null;
+    upgradeDraftSides(state.draft);
     state.view='home';setWeekForDate(state.selectedDate);
     await save('settings','sessions','draft');render();toast(`成功导入 ${sessions.length} 条训练记录`);
   } catch(error){toast(`导入失败：${error.message||'文件格式错误'}`);}
@@ -683,6 +758,8 @@ async function dispatchAction(button) {
     case 'next-exercise':
       if(state.draft){state.draft.activeIndex=Math.min(state.draft.plan.length-1,state.draft.activeIndex+1);save('draft');render();window.scrollTo({top:0,behavior:'instant'});}break;
     case 'complete-set':completeSet(button.dataset.ex,Number(button.dataset.set));break;
+    case 'complete-side':completeSide(button.dataset.ex,Number(button.dataset.set),button.dataset.side);break;
+    case 'undo-side':undoSide(button.dataset.ex,Number(button.dataset.set),button.dataset.side);break;
     case 'undo-set':undoSet(button.dataset.ex,Number(button.dataset.set));break;
     case 'extend-rest':
       if(state.draft?.restUntil){state.draft.restUntil=Math.max(Date.now(),state.draft.restUntil)+30000;state.draft.restTotal+=30;save('draft');render();}break;
@@ -755,9 +832,10 @@ async function initialize() {
     state.settings={...DEFAULT_SETTINGS,...(saved.settings||{})};
     state.sessions=Array.isArray(saved.sessions)?saved.sessions:[];
     state.draft=saved.draft?.status==='active'?saved.draft:null;
+    const draftUpgraded=upgradeDraftSides(state.draft);
     state.settings.startDate=resolveStartDate(saved.settings,state.sessions,state.draft,NOW);
     // 首次打开也保存起始周，避免没有手动改设置时每到周一又回到第 1 周。
-    await save('settings');
+    await save('settings',...(draftUpgraded?['draft']:[]));
     if(state.draft?.restUntil && Date.now()>=state.draft.restUntil) lastTimerExpired=state.draft.restUntil;
     setWeekForDate(state.selectedDate);
     render();

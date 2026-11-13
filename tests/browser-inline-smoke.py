@@ -12,6 +12,7 @@ import json
 ROOT = Path(__file__).resolve().parent.parent
 PLAN = (ROOT / 'plan.js').read_text().replace('export ', '')
 GUIDES = (ROOT / 'exercise-guides.js').read_text().replace('export ', '')
+MOVEMENT = (ROOT / 'movement.js').read_text().replace('export ', '')
 STORAGE = (ROOT / 'storage.js').read_text().replace('export ', '')
 APP_SOURCE = (ROOT / 'app.js').read_text()
 APP = APP_SOURCE[APP_SOURCE.index('const APP_NAME'):]
@@ -30,7 +31,7 @@ def boot(page, store=None):
           removeItem(k){delete window.__store[k]}
         }});
     '''
-    page.add_script_tag(content=stub + PLAN + '\n' + GUIDES + '\n' + STORAGE + '\n' + APP)
+    page.add_script_tag(content=stub + PLAN + '\n' + GUIDES + '\n' + MOVEMENT + '\n' + STORAGE + '\n' + APP)
     page.locator('.hero h1').wait_for(timeout=10000)
 
 
@@ -77,8 +78,12 @@ def main():
         for _ in range(6):
             if page.locator('[data-action="stop-rest"]').count():
                 page.locator('[data-action="stop-rest"]').click()
-            assert page.locator('[data-action="complete-set"]').count() == 1
-            page.locator('[data-action="complete-set"]').click()
+            if page.locator('[data-action="complete-side"]').count():
+                page.locator('[data-action="complete-side"]').first.click()
+                page.locator('[data-action="complete-side"]').first.click()
+            else:
+                assert page.locator('[data-action="complete-set"]').count() == 1
+                page.locator('[data-action="complete-set"]').click()
             if page.locator('[data-action="continue-exercise"]').count():
                 page.locator('[data-action="continue-exercise"]').click()
         assert page.locator('[data-action="finish"]').count() == 1

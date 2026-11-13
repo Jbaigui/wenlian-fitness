@@ -1,6 +1,6 @@
 // 训练计划 v1：零基础、健康与体能，每周一/三/五，同一套全身动作。
 // 计划是可修改的静态定义；开始训练时复制一份快照到记录中。
-export const PLAN_VERSION = '1.1';
+export const PLAN_VERSION = '1.2';
 export const ACE_LIBRARY = 'https://www.acefitness.org/resources/everyone/exercise-library/';
 
 export const EXERCISES = {
