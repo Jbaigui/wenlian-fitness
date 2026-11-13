@@ -96,6 +96,11 @@ main{padding:0 19px 26px}
 .side-complete{width:100%;margin-top:12px;white-space:normal;line-height:1.6}
 .single-field{grid-template-columns:1fr}
 .side-group-status{font-size:13px;line-height:1.7;color:#375f46;font-weight:700;margin:13px 0 0}
+.progression-guide{margin:15px 0;border:1px solid #c9d8b7;border-radius:15px;padding:14px 16px;background:#f3f7eb;color:#35543d}
+.progression-guide summary{font-size:14px;font-weight:800;line-height:1.7;cursor:pointer}
+.progression-guide ol{padding-left:20px;margin:12px 0}
+.progression-guide li,.progression-guide p{font-size:13px;line-height:1.85;margin:9px 0}
+.callout .secondary{margin-top:9px;width:100%}
 .navbar{position:fixed;z-index:10;bottom:0;width:100%;max-width:530px;display:grid;grid-template-columns:repeat(4,1fr);background:#fffdfaee;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid #dce6de;padding:9px 10px calc(9px + env(safe-area-inset-bottom));gap:1px}
 .nav-item{background:transparent;border-radius:11px;color:#86968b;padding:7px 0 3px;display:flex;align-items:center;flex-direction:column;gap:4px;font-size:10px;font-weight:660}
 .nav-item.active{color:#275f4c}

@@ -21,6 +21,16 @@ test('workout progression is beginner-friendly',()=>{
   assert.equal(week5.find(x=>x.id==='shoulder').sets,2);
   assert.equal(week1.find(x=>x.id==='row').unit,'次/侧');
 });
+test('progressive level raises three main movements without increasing every action',()=>{
+  for(const week of [1,2,3,5,8]){
+    const p=workoutForWeek(week,'progressive');
+    for(const id of ['squat','pulldown','chest'])assert.equal(p.find(ex=>ex.id===id).sets,3);
+    for(const id of ['hinge','row','core'])assert.equal(p.find(ex=>ex.id===id).sets,2);
+    for(const id of ['warmup','cardio'])assert.equal(p.find(ex=>ex.id===id).sets,1);
+    assert.equal(p.some(ex=>ex.id==='shoulder'),week>=3);
+    if(week>=3)assert.equal(p.find(ex=>ex.id==='shoulder').sets,2);
+  }
+});
 test('recommended day is Mon/Wed/Fri in local date',()=>{
   assert.equal(recommendedDate(new Date(2026,10,10)), '2026-11-11');
   assert.equal(toLocalDate(startOfWeek(new Date(2026,10,15))), '2026-11-09');

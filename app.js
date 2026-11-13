@@ -1,7 +1,7 @@
 import {
   EXERCISES, PLAN_VERSION, fromLocalDate, toLocalDate, plusDays, startOfWeek,
   getWeekNumber, recommendedDate, workoutForWeek, weekPhase, dateLabel,
-  volumeExplanation, exerciseProgress, nextPendingExercise, resolveStartDate
+  volumeExplanation, exerciseProgress, nextPendingExercise, resolveStartDate, trainingLevelName
 } from './plan.js';
 import {readAll, writeData, downloadFile} from './storage.js';
 import {EXERCISE_GUIDES, GUIDE_REVIEWED} from './exercise-guides.js';
@@ -14,6 +14,7 @@ const DEFAULT_SETTINGS = {
   startDate: toLocalDate(startOfWeek(NOW)),
   restSeconds: 90,
   soundEnabled: false,
+  trainingLevel: 'progressive',
   trainingGoal: '改善体能与健康'
 };
 const state = {
@@ -90,14 +91,14 @@ function sessionDateRange() {
 }
 function makeSession(date) {
   const week=getWeek(date);
-  const plan=workoutForWeek(week);
+  const plan=workoutForWeek(week,state.settings.trainingLevel);
   const records={};
   for (const ex of plan) {
     records[ex.id] = Array.from({length:ex.sets},()=>freshRecord(ex));
   }
   const id=(window.crypto?.randomUUID?.() || `s-${Date.now()}-${Math.round(Math.random()*1e8)}`);
   return {
-    id,date,week,planVersion: PLAN_VERSION,createdAt:new Date().toISOString(),
+    id,date,week,trainingLevel:state.settings.trainingLevel,planVersion: PLAN_VERSION,createdAt:new Date().toISOString(),
     completedAt:null,status:'active',plan,records,skipped:[],activeIndex:0,
     restUntil:null,restTotal:0,notes:'',overallFeel:'适中'
   };
@@ -133,7 +134,7 @@ function navMarkup() {
 function heading(sub) {
   const now = new Date();
   const today = toLocalDate(now);
-  return `<header class="topbar"><div class="brand"><span class="brand-mini">稳</span>${APP_NAME} <small class="version-label">V1.2.2</small></div><div class="top-date">${sub || dateLabel(today)}</div></header>`;
+  return `<header class="topbar"><div class="brand"><span class="brand-mini">稳</span>${APP_NAME} <small class="version-label">V1.3</small></div><div class="top-date">${sub || dateLabel(today)}</div></header>`;
 }
 function render() {
   let content='';
@@ -150,8 +151,8 @@ function renderHome() {
   const scheduled=[0,2,4].map(d=>toLocalDate(plusDays(monday,d)));
   const chosen=state.selectedDate;
   const week=getWeek(chosen);
-  const phase=weekPhase(Math.max(1,week));
-  const workout=workoutForWeek(week);
+  const phase=weekPhase(Math.max(1,week),state.settings.trainingLevel);
+  const workout=workoutForWeek(week,state.settings.trainingLevel);
   const doneToday=getSessionByDate(chosen);
   const existingDraft=state.draft;
   const inWeek=weekSessions(monday);
@@ -164,7 +165,7 @@ function renderHome() {
       <p class="hero-sub">每周三次全身训练。不追求一次练狠，追求每一周都在进步。</p>
       <div class="hero-tags"><span>零基础友好</span><span>全身力量</span><span>健康体能</span></div>
     </section>
-    ${existingDraft && existingDraft.status==='active'?`<div class="tip">${icon('info')} <div>有一场 <b>${esc(dateLabel(existingDraft.date))}</b> 的训练尚未结束。<button class="text-link" data-action="resume">点此恢复</button></div></div>`:''}
+    ${existingDraft && existingDraft.status==='active'?`<div class="tip">${icon('info')} <div>有一场 <b>${esc(dateLabel(existingDraft.date))}</b> 的训练尚未结束（${trainingLevelName(existingDraft.trainingLevel)}）。<button class="text-link" data-action="resume">点此恢复</button>${state.settings.trainingLevel==='progressive' && existingDraft.trainingLevel!=='progressive'?'<p>已做记录保留，可为当前训练补上进阶组数。</p><button class="secondary" data-action="upgrade-draft">将当前训练升级为进阶版</button>':''}</div></div>`:''}
     <section class="week-nav">
       <button class="icon-button" data-action="prev-week" aria-label="上一周">${icon('left')}</button>
       <div class="week-caption">${weekName}<small>${prettyDate(scheduled[0])} — ${prettyDate(scheduled[2])} · 已完成 ${inWeek.length}/3 次</small></div>
@@ -182,10 +183,10 @@ function renderHome() {
         </button>`;
       }).join('')}
     </section>
-    <div class="section-heading"><h2>${prettyDate(chosen)}的计划</h2><small>${week<=1?'动作学习优先':phase}</small></div>
+    <div class="section-heading"><h2>${prettyDate(chosen)}的计划</h2><small>${state.settings.trainingLevel==='progressive'?'三组主练 · 两组辅助':week<=1?'动作学习优先':phase}</small></div>
     <section class="panel">
       <div class="summary-top">
-        <div><h3>全身基础力量</h3><p>${dateLabel(chosen)} · 包含热身及快走</p></div>
+        <div><h3>全身基础力量 · ${trainingLevelName(state.settings.trainingLevel)}</h3><p>${dateLabel(chosen)} · 包含热身及快走</p></div>
         <span class="badge">计划 ${planSets(workout)} 组</span>
       </div>
       <div class="stats">
@@ -198,7 +199,8 @@ function renderHome() {
       </button>
       ${doneToday?`<button class="tertiary" style="width:100%;margin-top:7px" data-action="view-session" data-id="${esc(doneToday.id)}">查看本次记录</button>`:''}
     </section>
-    <div class="callout green-callout">${volumeExplanation(week)}</div>
+    <div class="callout green-callout">${volumeExplanation(week,state.settings.trainingLevel)}</div>
+    ${state.settings.trainingLevel==='progressive'?renderProgressionGuide():''}
     <div class="section-heading"><h2>动作顺序</h2><small>点击查看站内详细教学</small></div>
     <p class="small-note">先连续做完一组的次数，再记录、休息；完成全部组数后换动作。</p>
     <section class="panel exercise-preview">
@@ -210,6 +212,36 @@ function renderHome() {
     ${week>8?'<div class="callout">已超过最初8周的训练期：目前沿用第8周的动作结构。建议导出记录进行下一阶段复盘。</div>':''}
     <p class="footer-note">${state.online?'目前在线':'当前离线'} · 训练记录仅保存于本机，尚未接入云同步</p>
   `;
+}
+function renderProgressionGuide() {
+  return `<details class="progression-guide"><summary>怎么让训练逐渐更有挑战？</summary>
+    <ol><li><b>这轮先加组数：</b>主练动作从 2 组到 3 组，先沿用原重量，辅助动作保持 2 组。</li>
+    <li><b>先达到次数上限：</b>同一重量下，连续两次训练的所有组都达到目标上限，动作稳定、仍有余力，再考虑加重。</li>
+    <li><b>下次小幅加重：</b>选哑铃或器械最小的可用增量；若跳档太大，先保留原重量。加重后从次数下限重新做起。</li>
+    <li><b>保留约 2～3 次余力：</b>最后几次应有挑战，仍能规范完成；无需每组做到再也举不起来。明显疼痛或动作失控时停止、降低负荷。</li></ol>
+    <p>左右分别做的动作以较吃力的一侧为准，两侧使用能稳定控制的负荷。</p>
+    <a class="text-link" href="https://acsm.org/resistance-training-guidelines-update-2026/" target="_blank" rel="noopener noreferrer">参考 ACSM 抗阻训练指南</a></details>`;
+}
+function upgradeCurrentDraft() {
+  const draft=state.draft;
+  if(!draft || draft.trainingLevel==='progressive') return;
+  const upgraded=workoutForWeek(draft.week,'progressive');
+  for(const ex of draft.plan){
+    const target=upgraded.find(item=>item.id===ex.id);
+    if(!target) continue;
+    const records=draft.records[ex.id] || (draft.records[ex.id]=[]);
+    const targetSets=Math.max(ex.sets,target.sets,records.length);
+    while(records.length<targetSets){
+      const last=records.at(-1);
+      const record=freshRecord(ex,{weightKg:last?.weightKg ?? ''});
+      if(record.sides && last?.sides) for(const side of SIDE_KEYS)record.sides[side].weightKg=last.sides[side].weightKg;
+      records.push(record);
+    }
+    ex.sets=targetSets;
+  }
+  draft.trainingLevel='progressive';draft.planVersion=PLAN_VERSION;
+  state.settings.trainingLevel='progressive';
+  save('settings','draft');render();toast('当前训练已补上进阶组数，已有记录与左右侧进度保留');
 }
 function renderWorkout() {
   const draft=state.draft;
@@ -229,10 +261,12 @@ function renderWorkout() {
     <section class="training-hero">
       <div class="eyebrow">TRAINING IN PROGRESS</div>
       <h2>${dateLabel(draft.date)}</h2>
-      <small>第 ${Math.max(1,draft.week)} 周 · 全身基础力量 · 共 ${draft.plan.length} 个环节</small>
+      <small>第 ${Math.max(1,draft.week)} 周 · ${trainingLevelName(draft.trainingLevel)} · 共 ${draft.plan.length} 个环节</small>
       <div class="progress-track"><div class="progress-fill" style="width:${progress}%"></div></div>
       <div class="progress-label"><span>已完成 ${done}/${total} 组</span><span>${progress}%</span></div>
     </section>
+    ${state.settings.trainingLevel==='progressive' && draft.trainingLevel!=='progressive'?'<div class="callout">当前训练沿用开始时的组数，已做内容保留。<button class="secondary" data-action="upgrade-draft">为当前训练补上进阶组数</button></div>':''}
+    ${draft.trainingLevel==='progressive'?renderProgressionGuide():''}
     <div class="workout-toolbar">
       <span class="tiny">环节 ${idx+1} / ${draft.plan.length}</span>
       <div class="stepper">
@@ -249,7 +283,7 @@ function renderWorkout() {
         <p>${ex.kind==='time'?'计时环节：按实际分钟数记录。':ex.unit==='次/侧'?`左右各 ${ex.min===ex.max?ex.min:ex.min+'–'+ex.max} 次才算一组。`:'一次完整动作算一次，达到目标次数后再记录一组。'}</p>
       </div>
       <div class="info-stripe">${icon('info')}<div>目标：${ex.sets} 组，每组 ${ex.min===ex.max?ex.min:`${ex.min}–${ex.max}`}${ex.unit}。${ex.kind==='reps'?'做完应保留约2次余力。':'以身体感受合适为准。'}</div></div>
-      <p class="volume-note">${volumeExplanation(draft.week)}</p>
+      <p class="volume-note">${volumeExplanation(draft.week,draft.trainingLevel)}</p>
       <div class="quick-cue">${icon('book')}<span>${esc(guide?.cue || ex.points[0])}</span></div>
       <button class="secondary" style="width:100%;margin-top:12px" data-action="show-exercise" data-id="${ex.id}">${icon('book')} 查看完整动作教学（无需跳转）</button>
       ${renderRest(draft)}
@@ -383,7 +417,8 @@ function renderSettings() {
   const s=state.settings;
   return `<div class="section-heading" style="margin-top:8px"><h2 style="font-size:25px">我的设置</h2><small>仅当前设备</small></div>
     <section class="panel">
-      <div class="summary-top"><div><h3>八周训练计划</h3><p>每周一、三、五 · 健康与体能 · 零基础</p></div><span class="badge">V1.2.2</span></div>
+      <div class="summary-top"><div><h3>八周训练计划</h3><p>每周一、三、五 · 健康与体能 · 零基础</p></div><span class="badge">V1.3</span></div>
+      <div class="select-line"><div><label for="training-level">训练方案</label><span>切换影响新训练；当前训练可单独升级</span></div><select id="training-level" data-setting="trainingLevel"><option value="progressive" ${s.trainingLevel==='progressive'?'selected':''}>基础进阶：主练3组</option><option value="intro" ${s.trainingLevel==='intro'?'selected':''}>动作熟悉：按原8周</option></select></div>
       <div class="select-line"><div><label for="start-date">第1周的起始日期</label><span>自动按该日期所在的周一计算</span></div><input id="start-date" type="date" data-setting="startDate" value="${esc(s.startDate)}"></div>
       <div class="select-line"><div><label for="rest-sec">默认组间休息</label><span>可在训练中临时延长30秒</span></div>
         <select id="rest-sec" data-setting="restSeconds">${[60,75,90,120,150].map(n=>`<option value="${n}" ${s.restSeconds===n?'selected':''}>${n} 秒</option>`).join('')}</select></div>
@@ -412,13 +447,13 @@ function renderSettings() {
       <div class="session-row"><span class="row-check">—</span><div class="row-main"><b>云端同步：尚未启用</b><small>后续版本才接入 Supabase 登录与同步</small></div></div>
       <div class="session-row"><span class="row-check">—</span><div class="row-main"><b>Apple Watch / Apple 健康：尚未启用</b><small>需要后续原生桥接；当前可独立使用手表体能训练</small></div></div>
     </section>
-    <p class="footer-note">稳练 · 开源单机版 V1.2.2 · 健身指导不替代专业医疗意见</p>`;
+    <p class="footer-note">稳练 · 开源单机版 V1.3 · 健身指导不替代专业医疗意见</p>`;
 }
 function renderModal() {
   const ex=state.modalExercise?EXERCISES[state.modalExercise]:null;
   if(!ex) return '';
   const guide=EXERCISE_GUIDES[ex.id];
-  const planned=state.draft?.plan.find(item=>item.id===ex.id) || workoutForWeek(getWeek(state.selectedDate)).find(item=>item.id===ex.id);
+  const planned=state.view==='workout'?state.draft?.plan.find(item=>item.id===ex.id):workoutForWeek(getWeek(state.selectedDate),state.settings.trainingLevel).find(item=>item.id===ex.id);
   const list=(title,items,ordered=false)=>`<h3>${title}</h3><${ordered?'ol':'ul'}>${items.map(item=>`<li>${esc(item)}</li>`).join('')}</${ordered?'ol':'ul'}>`;
   return `<div class="modal-backdrop" data-action="close-modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <div class="modal-handle"></div><button class="modal-close" data-action="close-modal" aria-label="关闭动作说明">${icon('close')}</button>
@@ -600,7 +635,10 @@ function updateSetField(target) {
 }
 async function updateSetting(target) {
   const setting=target.dataset.setting;
-  if(setting==='startDate') {
+  if(setting==='trainingLevel') {
+    if(!['intro','progressive'].includes(target.value)) return;
+    state.settings.trainingLevel=target.value;
+  } else if(setting==='startDate') {
     const iso=target.value;
     if(!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return;
     state.settings.startDate=toLocalDate(startOfWeek(fromLocalDate(iso)));
@@ -627,7 +665,7 @@ function makeReport() {
   ];
   if(!list.length) lines.push('尚无已完成训练。');
   for(const s of list){
-    lines.push('',`### ${s.date} · 第 ${s.week} 周（${s.planVersion || PLAN_VERSION}）`,
+    lines.push('',`### ${s.date} · 第 ${s.week} 周 · ${trainingLevelName(s.trainingLevel)}（${s.planVersion || PLAN_VERSION}）`,
       `整体感受：${s.overallFeel || '未填写'}；完成 ${completedSets(s)}/${totalSets(s)} 组`);
     for(const ex of s.plan){
       const items=(s.records?.[ex.id]||[]).map((r,i)=>hasRecordedWork(r)?`第${i+1}组 ${recordDescription(ex,r)}`:null).filter(Boolean);
@@ -661,7 +699,7 @@ function makeCsv() {
   return '\ufeff'+rows.map(row=>row.map(csvCell).join(',')).join('\r\n');
 }
 function exportBackup() {
-  const dump={app:'wenlian',schemaVersion:2,appVersion:'1.2.2',exportedAt:new Date().toISOString(),settings:state.settings,sessions:state.sessions,draft:state.draft};
+  const dump={app:'wenlian',schemaVersion:2,appVersion:'1.3',exportedAt:new Date().toISOString(),settings:state.settings,sessions:state.sessions,draft:state.draft};
   downloadFile(`稳练-完整备份-${toLocalDate(new Date())}.json`,JSON.stringify(dump,null,2));
   toast('已创建完整 JSON 备份');
 }
@@ -702,6 +740,7 @@ function normalizeSession(raw) {
   return {
     id:String(raw.id||`imported-${Date.now()}`).slice(0,90),date:raw.date,
     week:Math.min(200,Math.max(1,Math.round(safeNumber(raw.week,1)))),
+    trainingLevel:raw.trainingLevel==='progressive'?'progressive':'intro',
     planVersion:String(raw.planVersion||PLAN_VERSION).slice(0,20),
     createdAt: typeof raw.createdAt==='string'?raw.createdAt:new Date().toISOString(),
     completedAt:typeof raw.completedAt==='string'?raw.completedAt:null,
@@ -726,7 +765,8 @@ async function importBackup(file) {
     state.settings={...DEFAULT_SETTINGS,
       startDate: /^\d{4}-\d{2}-\d{2}$/.test(oldSettings.startDate||'')?toLocalDate(startOfWeek(fromLocalDate(oldSettings.startDate))):DEFAULT_SETTINGS.startDate,
       restSeconds: [60,75,90,120,150].includes(Number(oldSettings.restSeconds))?Number(oldSettings.restSeconds):90,
-      soundEnabled:Boolean(oldSettings.soundEnabled),trainingGoal:'改善体能与健康'
+      soundEnabled:Boolean(oldSettings.soundEnabled),trainingGoal:'改善体能与健康',
+      trainingLevel:oldSettings.trainingLevel==='progressive'?'progressive':'intro'
     };
     state.sessions=sessions;
     state.draft=data.draft?normalizeSession(data.draft):null;
@@ -754,6 +794,7 @@ async function dispatchAction(button) {
     }
     case 'start':createTraining();break;
     case 'resume':newView('workout');break;
+    case 'upgrade-draft':upgradeCurrentDraft();break;
     case 'continue-exercise':
       if(state.draft){
         const next=nextPendingExercise(state.draft);
@@ -842,6 +883,7 @@ async function initialize() {
   try {
     const saved=await readAll();
     state.settings={...DEFAULT_SETTINGS,...(saved.settings||{})};
+    if(!['intro','progressive'].includes(state.settings.trainingLevel)) state.settings.trainingLevel=DEFAULT_SETTINGS.trainingLevel;
     state.sessions=Array.isArray(saved.sessions)?saved.sessions:[];
     state.draft=saved.draft?.status==='active'?saved.draft:null;
     const draftUpgraded=upgradeDraftSides(state.draft);

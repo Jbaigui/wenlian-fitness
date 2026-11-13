@@ -15,7 +15,7 @@ GUIDES = (ROOT / 'exercise-guides.js').read_text().replace('export ', '')
 MOVEMENT = (ROOT / 'movement.js').read_text().replace('export ', '')
 STORAGE = (ROOT / 'storage.js').read_text().replace('export ', '')
 APP_SOURCE = (ROOT / 'app.js').read_text()
-APP = APP_SOURCE[APP_SOURCE.index('const APP_NAME'):]
+APP = APP_SOURCE[APP_SOURCE.index('const APP_NAME'):].replace('initialize();',"DEFAULT_SETTINGS.trainingLevel='intro'; state.settings.trainingLevel='intro'; initialize();")
 CSS = (ROOT / 'styles.css').read_text()
 
 

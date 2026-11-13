@@ -1,6 +1,6 @@
 // 训练计划 v1：零基础、健康与体能，每周一/三/五，同一套全身动作。
 // 计划是可修改的静态定义；开始训练时复制一份快照到记录中。
-export const PLAN_VERSION = '1.2';
+export const PLAN_VERSION = '1.3';
 export const ACE_LIBRARY = 'https://www.acefitness.org/resources/everyone/exercise-library/';
 
 export const EXERCISES = {
@@ -120,26 +120,30 @@ export function resolveStartDate(settings,sessions=[],draft=null,today=new Date(
   }).sort();
   return inferred[0] || toLocalDate(startOfWeek(today));
 }
-export function workoutForWeek(weekNumber) {
+export function workoutForWeek(weekNumber, trainingLevel='intro') {
   const w = Math.max(1,Math.min(8,weekNumber));
-  const basicSets = w === 1 ? 1 : 2;
+  const progressive=trainingLevel==='progressive';
+  const basicSets = progressive?2:w === 1 ? 1 : 2;
   const items = [
-    ['warmup',1], ['squat',basicSets], ['pulldown',basicSets],
-    ['chest',basicSets], ['hinge',basicSets], ['row',basicSets],
-    ...(w>=3 ? [['shoulder',w<5?1:2]] : []),
+    ['warmup',1], ['squat',progressive?3:basicSets], ['pulldown',progressive?3:basicSets],
+    ['chest',progressive?3:basicSets], ['hinge',basicSets], ['row',basicSets],
+    ...(w>=3 ? [['shoulder',progressive?2:w<5?1:2]] : []),
     ['core',basicSets], ['cardio',1]
   ];
   return items.map(([id,sets])=>({
     ...EXERCISES[id], sets, minReps: EXERCISES[id].min, maxReps: EXERCISES[id].max
   }));
 }
-export function weekPhase(weekNumber) {
+export function trainingLevelName(level) {return level==='progressive'?'基础进阶版':'动作熟悉版';}
+export function weekPhase(weekNumber, trainingLevel='intro') {
+  if(trainingLevel==='progressive') return '基础进阶 · 稳定加量';
   if (weekNumber<=2) return '动作适应期';
   if (weekNumber<=4) return '规律建立期';
   if (weekNumber<=6) return '渐进训练期';
   return '巩固提升期';
 }
-export function volumeExplanation(weekNumber) {
+export function volumeExplanation(weekNumber, trainingLevel='intro') {
+  if(trainingLevel==='progressive') return `基础进阶版：深蹲、下拉、卧推各 3 组；硬拉、划船、死虫式各 2 组${weekNumber>=3?'，推肩 2 组':''}。这轮先用原重量适应新增组数；热身和快走各 1 个计时环节。`;
   if (weekNumber<=1) return '第 1 周学习动作：主要力量动作各 1 组。第 2 周起各 2 组；热身和快走始终是 1 个计时环节。';
   if (weekNumber===2) return '第 2 周：主要力量动作各 2 组。每组都要单独完成并记录；热身和快走各 1 个计时环节。';
   return `第 ${weekNumber} 周：主要力量动作各 2 组，推肩 ${weekNumber<5?1:2} 组；热身和快走各 1 个计时环节。`;

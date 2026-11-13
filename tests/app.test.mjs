@@ -19,7 +19,7 @@ function app(saved={},pendingFields=[]) {
   let source=readFileSync(new URL('../app.js',import.meta.url),'utf8');
   source=source.slice(source.indexOf('const APP_NAME')).replace(/initialize\(\);\s*$/,'');
   // toast 的 DOM 动画不属于本测试；保留传入文本以检查用户提示。
-  source+='\nrenderToast=()=>{}; globalThis.api={state,initialize,makeSession,completeSet,completeSide,undoSide,undoSet,updateSetField,dispatchAction,renderWorkout,renderModal,makeReport,makeCsv,normalizeSession,completedSets,flush:()=>saveQueue};';
+  source+='\nrenderToast=()=>{}; globalThis.api={state,initialize,makeSession,completeSet,completeSide,undoSide,undoSet,upgradeCurrentDraft,updateSetting,updateSetField,dispatchAction,renderWorkout,renderModal,makeReport,makeCsv,normalizeSession,completedSets,flush:()=>saveQueue};';
   new vm.Script(source).runInContext(context);
   return {api:context.api,root,writes};
 }
@@ -31,6 +31,7 @@ test('first startup persists settings even without user editing settings',async(
 test('first and final sets remain on the same action until explicit continue',async()=>{
   const {api}=app();
   api.state.settings.startDate='2026-11-09';
+  api.state.settings.trainingLevel='intro';
   api.state.draft=api.makeSession('2026-11-16');
   api.state.draft.activeIndex=1;
   api.state.view='workout';
@@ -54,6 +55,7 @@ test('first and final sets remain on the same action until explicit continue',as
 test('legacy single-set draft restores start date and retains its original volume',async()=>{
   const first=app();
   first.api.state.settings.startDate='2026-11-09';
+  first.api.state.settings.trainingLevel='intro';
   const draft=first.api.makeSession('2026-11-11');
   draft.records.squat[0].done=true;
   const {api}=app({draft,sessions:[]});
@@ -69,6 +71,7 @@ test('legacy single-set draft restores start date and retains its original volum
 
 function rowSession(api) {
   api.state.settings.startDate='2026-11-09';
+  api.state.settings.trainingLevel='intro';
   api.state.draft=api.makeSession('2026-11-16');
   api.state.draft.activeIndex=api.state.draft.plan.findIndex(ex=>ex.id==='row');
   api.state.view='workout';
@@ -160,4 +163,41 @@ test('completion captures current side input even if change event has not fired'
   api.completeSide('row',0,'right');
   assert.equal(s.records.row[0].sides.right.weightKg,5);
   assert.equal(s.records.row[0].done,true);
+});
+test('new sessions default to progressive level and preserve level through backup normalization',async()=>{
+  const {api}=app();await api.initialize();
+  assert.equal(api.state.settings.trainingLevel,'progressive');
+  api.state.settings.startDate='2026-11-09';
+  const s=api.makeSession('2026-11-13');
+  assert.equal(s.trainingLevel,'progressive');
+  assert.equal(s.records.squat.length,3);assert.equal(s.records.row.length,2);
+  assert.equal(s.records.row[0].sides.left.done,false);
+  const restored=api.normalizeSession(JSON.parse(JSON.stringify(s)));
+  assert.equal(restored.trainingLevel,'progressive');assert.equal(restored.plan.find(ex=>ex.id==='squat').sets,3);
+});
+test('upgrading an old draft appends groups while retaining prior and partial-side records',async()=>{
+  const {api}=app();api.state.settings.trainingLevel='intro';api.state.settings.startDate='2026-11-09';
+  const draft=api.makeSession('2026-11-13');api.state.draft=draft;api.state.view='workout';
+  draft.notes='keep note';draft.records.squat[0].actual=9;draft.records.squat[0].weightKg=4;api.completeSet('squat',0);
+  draft.activeIndex=draft.plan.findIndex(ex=>ex.id==='row');
+  draft.records.row[0].sides.left.weightKg=5;api.completeSide('row',0,'left');
+  const originalId=draft.id,oldSquat=draft.records.squat[0],oldRow=draft.records.row[0];
+  const beforeSquat=JSON.stringify(oldSquat),beforeRow=JSON.stringify(oldRow);
+  api.upgradeCurrentDraft();
+  assert.equal(draft.id,originalId);assert.equal(draft.notes,'keep note');assert.equal(draft.trainingLevel,'progressive');
+  assert.equal(JSON.stringify(draft.records.squat[0]),beforeSquat);
+  assert.equal(JSON.stringify(draft.records.row[0]),beforeRow);
+  assert.equal(draft.records.squat.length,3);assert.equal(draft.records.squat[1].weightKg,4);assert.equal(draft.records.squat[1].done,false);
+  assert.equal(draft.records.row.length,2);assert.equal(draft.records.row[1].sides.left.done,false);
+  assert.equal(draft.records.row[0].sides.right.done,false);assert.equal(api.completedSets(draft),1);
+  api.upgradeCurrentDraft();assert.equal(draft.records.squat.length,3);
+  await api.flush();
+});
+test('changing level affects future sessions and leaves an ongoing snapshot intact',async()=>{
+  const {api}=app();const draft=rowSession(api);
+  await api.updateSetting({dataset:{setting:'trainingLevel'},value:'progressive'});
+  assert.equal(draft.trainingLevel,'intro');assert.equal(draft.plan.find(ex=>ex.id==='squat').sets,2);
+  assert.equal(api.makeSession('2026-11-18').records.squat.length,3);
+  const restored=app({settings:{startDate:'2026-11-09',trainingLevel:'intro'},draft,sessions:[]});await restored.api.initialize();
+  assert.equal(restored.api.state.settings.trainingLevel,'intro');assert.equal(restored.api.state.draft.records.squat.length,2);
 });
